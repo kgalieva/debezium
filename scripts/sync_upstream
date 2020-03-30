@@ -1,0 +1,104 @@
+#!/bin/bash
+set -euox pipefail
+
+########################################################################################################################
+# Usage: script/sync_upstream
+# Example: script/sync_upstream
+#
+# This script sync's the pristine-main branch with Debezium/Debezium main, and rebases the Shopify/Debezium main
+# branch on pristine-main.
+#
+########################################################################################################################
+
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+REMOTE_NAME="upstream"
+REMOTE_URL="https://github.com/debezium/debezium"
+
+error() {
+  echo -e "💩! ${1}\n" 1>&2 && exit 1
+}
+
+is_on_main() {
+  [ "${BRANCH}" == "main" ]
+}
+
+is_git_clean() {
+  # untracked files are cool, but nothing in the index waiting to be committed or changed is allowed
+  git diff --exit-code && git diff --quiet --cached HEAD
+}
+
+sync_upstream() {
+  git checkout pristine-main
+
+  # Check if the remote already exists
+  if git remote get-url $REMOTE_NAME &>/dev/null; then
+    echo "Remote '$REMOTE_NAME' already exists."
+  else
+    # Add the remote if it doesn't exist
+    git remote add $REMOTE_NAME $REMOTE_URL
+    echo "Remote '$REMOTE_NAME' added with URL '$REMOTE_URL'."
+  fi
+
+  git pull upstream main
+  git push origin pristine-main
+
+  git checkout main
+  git pull origin main
+  # If you get an issue here, you likely need to go in and clean up the .github/workflows/ folder because of this issue
+  # https://github.com/Shopify/debezium/pull/245
+if ! git rebase upstream/main; then
+    echo "Rebase encountered conflicts. Resolving..."
+
+    # Resolve conflicts in .github/ directory
+    git checkout --ours .github/
+    git add .github/
+    
+    # Continue the rebase
+    git rebase --continue || {
+      echo "Rebase failed after resolving conflicts. Please resolve manually."
+      exit 1
+    }
+  fi
+  git push --force-with-lease origin main
+
+  # Create Shopify Specific branches for the last 10 tags
+  git fetch upstream --tags
+  git tag --list "v*.*" | tail -n 10 | while read tag; do
+      if git show-ref --verify --quiet "refs/heads/shopify-$tag"; then
+          git branch -D shopify-$tag
+      fi
+      if git show-ref --verify --quiet "refs/tags/shopify-$tag"; then
+          git tag -d shopify-$tag
+      fi
+      git checkout -b shopify-$tag $tag
+      # Apply the Shopify dev/CI/release tooling commit
+      if ! git cherry-pick $(git log --oneline main | grep "Shopify dev/CI/release tooling" | cut -d' ' -f1); then
+          echo "Cherry-pick encountered conflicts. Resolving..."
+
+          # As part of https://github.com/Shopify/debezium/pull/245 we need to remove GitHub Actions, this causes a conflict
+          # this is the reason that we use diff-filter=U and filter on the github folder. If there are other conflicts, we will
+          # need to resolve them manually.
+          conflicted_github_files=$(git diff --name-only --diff-filter=U -- .github/)
+          for file in $conflicted_github_files; do
+              git add $file
+          done
+
+          git cherry-pick --continue --no-edit
+      fi
+      git tag shopify-$tag HEAD
+      git push --force origin --tags
+  done
+  git checkout main
+}
+
+main() {
+  # can only sync from the main branch with a clean git index (nothing outstanding)
+  if ! is_on_main;
+    then error "Releases must be started from main.";
+  fi
+  if ! is_git_clean; then error "You need to commit or stash your changes to release"; fi
+
+  sync_upstream
+}
+
+main "$@"

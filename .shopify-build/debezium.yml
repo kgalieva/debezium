@@ -1,0 +1,18 @@
+---
+containers:
+  default:
+    docker: gcr.io/shopify-docker-images/cloud/maven-gradle-sbt-jdk@sha256:5dcf45a3eb4eb623db447d6476ff2bdd322a260e4d977efe48da4d6ec1a34055
+
+steps:
+  - label: "Test Debezium MySQL Connector"
+    run:
+      - mvn clean install -Dquick && mvn -pl debezium-connector-mysql test
+    timeout: 30m
+  - label: "Test Debezium Core"
+    run:
+      - mvn clean install -Dquick && mvn -pl debezium-core test
+    timeout: 30m
+  - label: "Test Debezium API"
+    run:
+      - mvn clean install -Dquick && mvn -pl debezium-api test
+    timeout: 30m
