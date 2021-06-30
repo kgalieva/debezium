@@ -28,6 +28,7 @@ import io.debezium.pipeline.ChangeEventSourceCoordinator;
 import io.debezium.pipeline.DataChangeEvent;
 import io.debezium.pipeline.ErrorHandler;
 import io.debezium.pipeline.EventDispatcher;
+import io.debezium.pipeline.signal.KafkaSignal;
 import io.debezium.relational.TableId;
 import io.debezium.relational.history.AbstractDatabaseHistory;
 import io.debezium.schema.TopicSelector;
@@ -158,7 +159,10 @@ public class MySqlConnectorTask extends BaseSourceTask<MySqlOffsetContext> {
                 schema);
 
         coordinator.start(taskContext, this.queue, metadataProvider);
-
+        if (connectorConfig.isReadOnlyConnection()) {
+            KafkaSignal<TableId> kafkaSignal = new KafkaSignal<>(MySqlConnector.class, connectorConfig, dispatcher);
+            kafkaSignal.start();
+        }
         return coordinator;
     }
 

@@ -255,7 +255,9 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<T extends Dat
     @Override
     @SuppressWarnings("unchecked")
     public void addDataCollectionNamesToSnapshot(List<String> dataCollectionIds, OffsetContext offsetContext) throws InterruptedException {
-        context = (IncrementalSnapshotContext<T>) offsetContext.getIncrementalSnapshotContext();
+        if (offsetContext != null) {
+            context = (IncrementalSnapshotContext<T>) offsetContext.getIncrementalSnapshotContext();
+        }
         boolean shouldReadChunk = false;
         if (!context.snapshotRunning()) {
             shouldReadChunk = true;
