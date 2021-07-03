@@ -270,6 +270,19 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<T extends Dat
         }
     }
 
+    @Override
+    public void rereadChunk() throws InterruptedException {
+        if (context == null) {
+            return;
+        }
+        if (!context.snapshotRunning() || !context.deduplicationNeeded() || window.isEmpty()) {
+            return;
+        }
+        window.clear();
+        context.revertChunk();
+        readChunk();
+    }
+
     protected void addKeyColumnsToCondition(Table table, StringBuilder sql, String predicate) {
         for (Iterator<Column> i = table.primaryKeyColumns().iterator(); i.hasNext();) {
             final Column key = i.next();

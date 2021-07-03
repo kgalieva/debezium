@@ -197,8 +197,14 @@ public class AbstractIncrementalSnapshotContext<T> implements IncrementalSnapsho
     }
 
     private void resetChunk() {
+        lastEventKeySent = null;
         chunkEndPosition = null;
         maximumKey = null;
+    }
+
+    public void revertChunk() {
+        chunkEndPosition = lastEventKeySent;
+        windowOpened = false;
     }
 
     public boolean isNonInitialChunk() {

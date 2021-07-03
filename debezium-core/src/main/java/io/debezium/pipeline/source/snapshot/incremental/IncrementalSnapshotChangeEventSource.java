@@ -27,4 +27,6 @@ public interface IncrementalSnapshotChangeEventSource<T extends DataCollectionId
 
     void addDataCollectionNamesToSnapshot(List<String> dataCollectionIds, OffsetContext offsetContext)
             throws InterruptedException;
+
+    void rereadChunk() throws InterruptedException;
 }

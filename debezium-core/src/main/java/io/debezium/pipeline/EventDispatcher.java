@@ -530,6 +530,9 @@ public class EventDispatcher<T extends DataCollectionId> {
                         schemaChangeKeySchema, key, schemaChangeValueSchema, value);
                 enqueueSchemaChangeMessage(record);
             }
+            if (incrementalSnapshotChangeEventSource != null) {
+                incrementalSnapshotChangeEventSource.rereadChunk();
+            }
         }
     }
 

@@ -35,6 +35,8 @@ public interface IncrementalSnapshotContext<T> {
 
     Object[] chunkEndPosititon();
 
+    void revertChunk();
+
     void sendEvent(Object[] keyFromRow);
 
     void maximumKey(Object[] key);
