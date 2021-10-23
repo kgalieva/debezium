@@ -143,6 +143,10 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<T extends Dat
     protected abstract void emitWindowClose() throws SQLException, InterruptedException;
 
     protected String buildChunkQuery(Table table) {
+        return buildChunkQuery(table, connectorConfig.getIncrementalSnashotChunkSize());
+    }
+
+    protected String buildChunkQuery(Table table, int limit) {
         String condition = null;
         // Add condition when this is not the first query
         if (context.isNonInitialChunk()) {
@@ -158,7 +162,7 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<T extends Dat
                 .map(Column::name)
                 .collect(Collectors.joining(", "));
         return jdbcConnection.buildSelectWithRowLimits(table.id(),
-                connectorConfig.getIncrementalSnashotChunkSize(),
+                limit,
                 "*",
                 Optional.ofNullable(condition),
                 orderBy);
@@ -244,18 +248,21 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<T extends Dat
             context.startNewChunk();
             emitWindowOpen();
             while (context.snapshotRunning()) {
+                if (isTableInvalid()) {
+                    continue;
+                }
+                if (connectorConfig.supportsSchemaChangesDuringIncrementalSnapshot()) {
+                    if (!context.isSchemaVerified()) {
+                        verifySchema();
+                        if (isTableInvalid()) {
+                            continue;
+                        }
+                        if (!context.isSchemaVerified()) {
+                            break;
+                        }
+                    }
+                }
                 final TableId currentTableId = (TableId) context.currentDataCollectionId();
-                currentTable = databaseSchema.tableFor(currentTableId);
-                if (currentTable == null) {
-                    LOGGER.warn("Schema not found for table '{}', known tables {}", currentTableId, databaseSchema.tableIds());
-                    nextDataCollection();
-                    continue;
-                }
-                if (currentTable.primaryKeyColumns().isEmpty()) {
-                    LOGGER.warn("Incremental snapshot for table '{}' skipped cause the table has no primary keys", currentTableId);
-                    nextDataCollection();
-                    continue;
-                }
                 if (!context.maximumKey().isPresent()) {
                     context.maximumKey(jdbcConnection.queryAndMap(buildMaxPrimaryKeyQuery(currentTable), rs -> {
                         if (!rs.next()) {
@@ -276,14 +283,19 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<T extends Dat
                                 context.maximumKey().orElse(new Object[0]));
                     }
                 }
-                createDataEventsForTable();
-                if (window.isEmpty()) {
-                    LOGGER.info("No data returned by the query, incremental snapshotting of table '{}' finished",
-                            currentTableId);
-                    tableScanCompleted();
-                    nextDataCollection();
+                if (createDataEventsForTable()) {
+                    if (window.isEmpty()) {
+                        LOGGER.info("No data returned by the query, incremental snapshotting of table '{}' finished",
+                                currentTableId);
+                        tableScanCompleted();
+                        nextDataCollection();
+                    }
+                    else {
+                        break;
+                    }
                 }
                 else {
+                    context.revertChunk();
                     break;
                 }
             }
@@ -297,6 +309,55 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<T extends Dat
             if (!context.snapshotRunning()) {
                 postIncrementalSnapshotCompleted();
             }
+        }
+    }
+
+    private boolean isTableInvalid() {
+        final TableId currentTableId = (TableId) context.currentDataCollectionId();
+        currentTable = databaseSchema.tableFor(currentTableId);
+        if (currentTable == null) {
+            LOGGER.warn("Schema not found for table '{}', known tables {}", currentTableId, databaseSchema.tableIds());
+            nextDataCollection();
+            return true;
+        }
+        if (currentTable.primaryKeyColumns().isEmpty()) {
+            LOGGER.warn("Incremental snapshot for table '{}' skipped cause the table has no primary keys", currentTableId);
+            nextDataCollection();
+            return true;
+        }
+        return false;
+    }
+
+    private void verifySchema() throws SQLException {
+        if (context.isSchemaVerified()) {
+            return;
+        }
+        if (context.getSchema() == null) {
+            context.setSchema(readSchema());
+        }
+        else {
+            if (!context.isSchemaVerified()) {
+                IncrementalSnapshotSchema currentSchema = readSchema();
+                if (context.getSchema().equals(currentSchema)) {
+                    context.setSchemaVerified(true);
+                }
+                else {
+                    context.setSchema(currentSchema);
+                }
+            }
+        }
+    }
+
+    private IncrementalSnapshotSchema readSchema() {
+        final String selectStatement = buildChunkQuery(currentTable, 0);
+        LOGGER.debug("Reading schema for table '{}' using select statement: '{}'", currentTable.id(), selectStatement);
+
+        try (PreparedStatement statement = readTableChunkStatement(selectStatement);
+                ResultSet rs = statement.executeQuery()) {
+            return new IncrementalSnapshotSchema(rs.getMetaData());
+        }
+        catch (SQLException e) {
+            throw new DebeziumException("Snapshotting of table " + currentTable.id() + " failed", e);
         }
     }
 
@@ -333,7 +394,7 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<T extends Dat
     /**
      * Dispatches the data change events for the records of a single table.
      */
-    private void createDataEventsForTable() {
+    private boolean createDataEventsForTable() {
         long exportStart = clock.currentTimeInMillis();
         LOGGER.debug("Exporting data chunk from table '{}' (total {} tables)", currentTable.id(), context.tablesToBeSnapshottedCount());
 
@@ -345,7 +406,9 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<T extends Dat
 
         try (PreparedStatement statement = readTableChunkStatement(selectStatement);
                 ResultSet rs = statement.executeQuery()) {
-
+            if (checkSchemaChanges(rs)) {
+                return false;
+            }
             final ColumnUtils.ColumnArray columnArray = ColumnUtils.toArray(rs, currentTable);
             long rows = 0;
             Timer logTimer = getTableScanLogTimer();
@@ -388,6 +451,21 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<T extends Dat
         catch (SQLException e) {
             throw new DebeziumException("Snapshotting of table " + currentTable.id() + " failed", e);
         }
+        return true;
+    }
+
+    private boolean checkSchemaChanges(ResultSet rs) throws SQLException {
+        if (!connectorConfig.supportsSchemaChangesDuringIncrementalSnapshot()) {
+            return false;
+        }
+        IncrementalSnapshotSchema schema = new IncrementalSnapshotSchema(rs.getMetaData());
+        if (!schema.equals(context.getSchema())) {
+            context.setSchemaVerified(false);
+            IncrementalSnapshotSchema oldSchema = context.getSchema();
+            context.setSchema(schema);
+            return true;
+        }
+        return false;
     }
 
     private void incrementTableRowsScanned(long rows) {

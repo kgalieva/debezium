@@ -619,6 +619,10 @@ public abstract class CommonConnectorConfig {
         return false;
     }
 
+    public boolean supportsSchemaChangesDuringIncrementalSnapshot() {
+        return false;
+    }
+
     @SuppressWarnings("unchecked")
     private List<CustomConverter<SchemaBuilder, ConvertedField>> getCustomConverters() {
         final String converterNameList = config.getString(CUSTOM_CONVERTERS);

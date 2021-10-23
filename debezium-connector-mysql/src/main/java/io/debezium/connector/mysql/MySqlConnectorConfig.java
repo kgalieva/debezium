@@ -1020,6 +1020,11 @@ public class MySqlConnectorConfig extends HistorizedRelationalDatabaseConnectorC
         return true;
     }
 
+    @Override
+    public boolean supportsSchemaChangesDuringIncrementalSnapshot() {
+        return true;
+    }
+
     private final Configuration config;
     private final SnapshotMode snapshotMode;
     private final SnapshotLockingMode snapshotLockingMode;

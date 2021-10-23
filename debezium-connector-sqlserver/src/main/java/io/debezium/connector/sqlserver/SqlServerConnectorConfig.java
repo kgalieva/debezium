@@ -445,6 +445,11 @@ public class SqlServerConnectorConfig extends HistorizedRelationalDatabaseConnec
     }
 
     @Override
+    public boolean supportsSchemaChangesDuringIncrementalSnapshot() {
+        return true;
+    }
+
+    @Override
     protected SourceInfoStructMaker<? extends AbstractSourceInfo> getSourceInfoStructMaker(Version version) {
         switch (version) {
             case V1:

@@ -73,6 +73,10 @@ public class AbstractIncrementalSnapshotContext<T> implements IncrementalSnapsho
      */
     private Object[] maximumKey;
 
+    private IncrementalSnapshotSchema schema;
+
+    private boolean schemaVerified;
+
     public AbstractIncrementalSnapshotContext(boolean useCatalogBeforeSchema) {
         this.useCatalogBeforeSchema = useCatalogBeforeSchema;
     }
@@ -211,6 +215,8 @@ public class AbstractIncrementalSnapshotContext<T> implements IncrementalSnapsho
         lastEventKeySent = null;
         chunkEndPosition = null;
         maximumKey = null;
+        schema = null;
+        schemaVerified = false;
     }
 
     public void revertChunk() {
@@ -242,6 +248,29 @@ public class AbstractIncrementalSnapshotContext<T> implements IncrementalSnapsho
 
     public Optional<Object[]> maximumKey() {
         return Optional.ofNullable(maximumKey);
+    }
+
+    @Override
+    public IncrementalSnapshotSchema getSchema() {
+        return schema;
+    }
+
+    @Override
+    public void setSchema(IncrementalSnapshotSchema schema) {
+        this.schema = schema;
+    }
+
+    @Override
+    public boolean isSchemaVerified() {
+        return schemaVerified;
+    }
+
+    @Override
+    public void setSchemaVerified(boolean schemaVerified) {
+        this.schemaVerified = schemaVerified;
+        if (schemaVerified) {
+            LOGGER.info("Schema verified {}", schema);
+        }
     }
 
     @Override
