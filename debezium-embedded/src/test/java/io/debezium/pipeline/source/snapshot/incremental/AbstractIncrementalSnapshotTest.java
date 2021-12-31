@@ -5,6 +5,9 @@
  */
 package io.debezium.pipeline.source.snapshot.incremental;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
+
 import java.nio.file.Path;
 import java.sql.SQLException;
 import java.util.Arrays;
@@ -229,6 +232,9 @@ public abstract class AbstractIncrementalSnapshotTest<T extends SourceConnector>
         assertConnectorIsRunning();
     }
 
+    protected void enableQueryLog(JdbcConnection connection) throws SQLException {
+    }
+
     @Test
     public void snapshotOnly() throws Exception {
         // Testing.Print.enable();
@@ -300,6 +306,7 @@ public abstract class AbstractIncrementalSnapshotTest<T extends SourceConnector>
         final int batchSize = 10;
         try (JdbcConnection connection = databaseConnection()) {
             connection.setAutoCommit(false);
+            enableQueryLog(connection);
             for (int i = 0; i < ROW_COUNT; i++) {
                 connection.executeWithoutCommitting(
                         String.format("UPDATE %s SET aa = aa + 2000 WHERE pk > %s AND pk <= %s", tableName(),
@@ -309,10 +316,18 @@ public abstract class AbstractIncrementalSnapshotTest<T extends SourceConnector>
         }
 
         final int expectedRecordCount = ROW_COUNT;
-        final Map<Integer, Integer> dbChanges = consumeMixedWithIncrementalSnapshot(expectedRecordCount,
-                x -> x.getValue() >= 2000, null);
+        final Map<Integer, SourceRecord> dbChanges = consumeRecordsMixedWithIncrementalSnapshot(expectedRecordCount,
+                x -> ((Struct) x.getValue().value()).getStruct("after").getInt32(valueFieldName()) >= 2000, null);
         for (int i = 0; i < expectedRecordCount; i++) {
-            Assertions.assertThat(dbChanges).includes(MapAssert.entry(i + 1, i + 2000));
+            SourceRecord record = dbChanges.get(i + 1);
+            final int value = ((Struct) record.value()).getStruct("after").getInt32(valueFieldName());
+            assertEquals(i + 2000, value);
+            Object query = ((Struct) record.value()).getStruct("source").get("query");
+            String snapshot = ((Struct) record.value()).getStruct("source").get("snapshot").toString();
+            if (!snapshot.equals("false")) {
+                assertNull(query);
+                assertEquals("incremental", snapshot);
+            }
         }
     }
 

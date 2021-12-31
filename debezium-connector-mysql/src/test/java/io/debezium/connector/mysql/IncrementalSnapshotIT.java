@@ -43,6 +43,7 @@ public class IncrementalSnapshotIT extends AbstractIncrementalSnapshotWithSchema
 
     protected Configuration.Builder config() {
         return DATABASE.defaultConfig()
+                .with(MySqlConnectorConfig.INCLUDE_SQL_QUERY, true)
                 .with(MySqlConnectorConfig.USER, "mysqluser")
                 .with(MySqlConnectorConfig.PASSWORD, "mysqlpw")
                 .with(MySqlConnectorConfig.SNAPSHOT_MODE, SnapshotMode.SCHEMA_ONLY.getValue())
@@ -120,5 +121,10 @@ public class IncrementalSnapshotIT extends AbstractIncrementalSnapshotWithSchema
     @Override
     protected String createTableStatement(String newTable, String copyTable) {
         return String.format("CREATE TABLE %s LIKE %s", newTable, copyTable);
+    }
+
+    @Override
+    protected void enableQueryLog(JdbcConnection connection) throws SQLException {
+        connection.execute("SET binlog_rows_query_log_events=ON");
     }
 }
