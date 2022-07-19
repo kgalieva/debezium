@@ -29,6 +29,7 @@ import io.debezium.connector.mongodb.ConnectionContext.MongoPrimary;
 import io.debezium.pipeline.EventDispatcher;
 import io.debezium.pipeline.source.AbstractSnapshotChangeEventSource;
 import io.debezium.pipeline.source.snapshot.incremental.CloseIncrementalSnapshotWindow;
+import io.debezium.pipeline.source.snapshot.incremental.DataCollection;
 import io.debezium.pipeline.source.snapshot.incremental.IncrementalSnapshotChangeEventSource;
 import io.debezium.pipeline.source.snapshot.incremental.IncrementalSnapshotContext;
 import io.debezium.pipeline.source.snapshot.incremental.OpenIncrementalSnapshotWindow;
@@ -121,8 +122,8 @@ public class MongoDbIncrementalSnapshotChangeEventSource
     protected void sendEvent(MongoDbPartition partition, EventDispatcher<MongoDbPartition, CollectionId> dispatcher, OffsetContext offsetContext, Object[] row)
             throws InterruptedException {
         context.sendEvent(keyFromRow(row));
-        ((ReplicaSetOffsetContext) offsetContext).readEvent(context.currentDataCollectionId(), clock.currentTimeAsInstant());
-        dispatcher.dispatchSnapshotEvent(partition, context.currentDataCollectionId(),
+        ((ReplicaSetOffsetContext) offsetContext).readEvent(context.currentDataCollectionId().getId(), clock.currentTimeAsInstant());
+        dispatcher.dispatchSnapshotEvent(partition, context.currentDataCollectionId().getId(),
                 getChangeRecordEmitter(partition, offsetContext, row),
                 dispatcher.getIncrementalSnapshotChangeEventReceiver(dataListener));
     }
@@ -226,7 +227,7 @@ public class MongoDbIncrementalSnapshotChangeEventSource
             context.startNewChunk();
             emitWindowOpen();
             while (context.snapshotRunning()) {
-                final CollectionId currentDataCollectionId = context.currentDataCollectionId();
+                final CollectionId currentDataCollectionId = context.currentDataCollectionId().getId();
                 currentCollection = (MongoDbCollectionSchema) collectionSchema.schemaFor(currentDataCollectionId);
                 if (replicaSets.all().size() > 1) {
                     LOGGER.warn("Incremental snapshotting supported only for single result set topology, skipping collection '{}', known collections {}",
@@ -316,10 +317,11 @@ public class MongoDbIncrementalSnapshotChangeEventSource
                 .stream()
                 .map(x -> rsName + "." + x)
                 .collect(Collectors.toList());
-        final List<CollectionId> newDataCollectionIds = context.addDataCollectionNamesToSnapshot(dataCollectionIds);
+        final List<DataCollection<CollectionId>> newDataCollectionIds = context.addDataCollectionNamesToSnapshot(dataCollectionIds, null);
         if (shouldReadChunk) {
             progressListener.snapshotStarted(partition);
-            progressListener.monitoredDataCollectionsDetermined(partition, newDataCollectionIds);
+            progressListener.monitoredDataCollectionsDetermined(partition, newDataCollectionIds.stream()
+                    .map(x -> x.getId()).collect(Collectors.toList()));
             readChunk(partition);
         }
     }

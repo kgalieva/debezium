@@ -140,9 +140,9 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<P extends Par
 
     protected void sendEvent(P partition, EventDispatcher<P, T> dispatcher, OffsetContext offsetContext, Object[] row) throws InterruptedException {
         context.sendEvent(keyFromRow(row));
-        offsetContext.event(context.currentDataCollectionId(), clock.currentTimeAsInstant());
-        dispatcher.dispatchSnapshotEvent(partition, context.currentDataCollectionId(),
-                getChangeRecordEmitter(partition, context.currentDataCollectionId(), offsetContext, row),
+        offsetContext.event(context.currentDataCollectionId().getId(), clock.currentTimeAsInstant());
+        dispatcher.dispatchSnapshotEvent(partition, context.currentDataCollectionId().getId(),
+                getChangeRecordEmitter(partition, context.currentDataCollectionId().getId(), offsetContext, row),
                 dispatcher.getIncrementalSnapshotChangeEventReceiver(dataListener));
     }
 
@@ -292,13 +292,13 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<P extends Par
                     // Closing the current window and repeating schema verification within the following window.
                     break;
                 }
-                final TableId currentTableId = (TableId) context.currentDataCollectionId();
+                final TableId currentTableId = (TableId) context.currentDataCollectionId().getId();
                 if (!context.maximumKey().isPresent()) {
                     currentTable = refreshTableSchema(currentTable);
                     Object[] maximumKey;
                     try {
                         maximumKey = jdbcConnection.queryAndMap(
-                                buildMaxPrimaryKeyQuery(currentTable, context.getAdditionalConditionToSnapshot()), rs -> {
+                                buildMaxPrimaryKeyQuery(currentTable, context.currentDataCollectionId().getAdditionalCondition()), rs -> {
                                     if (!rs.next()) {
                                         return null;
                                     }
@@ -354,7 +354,7 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<P extends Par
     }
 
     private boolean isTableInvalid(P partition) {
-        final TableId currentTableId = (TableId) context.currentDataCollectionId();
+        final TableId currentTableId = (TableId) context.currentDataCollectionId().getId();
         currentTable = databaseSchema.tableFor(currentTableId);
         if (currentTable == null) {
             LOGGER.warn("Schema not found for table '{}', known tables {}", currentTableId, databaseSchema.tableIds());
@@ -432,11 +432,11 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<P extends Par
             LOGGER.info("Data-collections to snapshot have been expanded from {} to {}", dataCollectionIds, expandedDataCollectionIds);
         }
 
-        final List<T> newDataCollectionIds = context.addDataCollectionNamesToSnapshot(expandedDataCollectionIds);
-        context.addAdditionalConditionToSnapshot(additionalCondition);
+        final List<DataCollection<T>> newDataCollectionIds = context.addDataCollectionNamesToSnapshot(expandedDataCollectionIds, additionalCondition);
         if (shouldReadChunk) {
             progressListener.snapshotStarted(partition);
-            progressListener.monitoredDataCollectionsDetermined(partition, newDataCollectionIds);
+            progressListener.monitoredDataCollectionsDetermined(partition, newDataCollectionIds.stream()
+                    .map(x -> x.getId()).collect(Collectors.toList()));
             readChunk(partition);
         }
     }
@@ -541,7 +541,7 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<P extends Par
         long exportStart = clock.currentTimeInMillis();
         LOGGER.debug("Exporting data chunk from table '{}' (total {} tables)", currentTable.id(), context.dataCollectionsToBeSnapshottedCount());
 
-        final String selectStatement = buildChunkQuery(currentTable, context.getAdditionalConditionToSnapshot());
+        final String selectStatement = buildChunkQuery(currentTable, context.currentDataCollectionId().getAdditionalCondition());
         LOGGER.debug("\t For table '{}' using select statement: '{}', key: '{}', maximum key: '{}'", currentTable.id(),
                 selectStatement, context.chunkEndPosititon(), context.maximumKey().get());
 

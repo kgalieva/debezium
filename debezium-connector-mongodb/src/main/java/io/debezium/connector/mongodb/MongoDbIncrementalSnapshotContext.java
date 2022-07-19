@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -22,8 +23,13 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import io.debezium.DebeziumException;
 import io.debezium.annotation.NotThreadSafe;
+import io.debezium.pipeline.source.snapshot.incremental.DataCollection;
 import io.debezium.pipeline.source.snapshot.incremental.IncrementalSnapshotContext;
 import io.debezium.relational.Table;
 import io.debezium.util.HexConverter;
@@ -42,6 +48,11 @@ public class MongoDbIncrementalSnapshotContext<T> implements IncrementalSnapshot
     // TODO Consider which (if any) information should be exposed in source info
     public static final String INCREMENTAL_SNAPSHOT_KEY = "incremental_snapshot";
     public static final String DATA_COLLECTIONS_TO_SNAPSHOT_KEY = INCREMENTAL_SNAPSHOT_KEY + "_collections";
+
+    public static final String DATA_COLLECTIONS_TO_SNAPSHOT_KEY_ID = DATA_COLLECTIONS_TO_SNAPSHOT_KEY + "_id";
+
+    public static final String DATA_COLLECTIONS_TO_SNAPSHOT_KEY_ADDITIONAL_CONDITION = DATA_COLLECTIONS_TO_SNAPSHOT_KEY
+            + "_additional_condition";
     public static final String EVENT_PRIMARY_KEY = INCREMENTAL_SNAPSHOT_KEY + "_primary_key";
     public static final String TABLE_MAXIMUM_KEY = INCREMENTAL_SNAPSHOT_KEY + "_maximum_key";
 
@@ -58,7 +69,7 @@ public class MongoDbIncrementalSnapshotContext<T> implements IncrementalSnapshot
     // TODO After extracting add into source info optional block
     // incrementalSnapshotWindow{String from, String to}
     // State to be stored and recovered from offsets
-    private final Queue<T> dataCollectionsToSnapshot = new LinkedList<>();
+    private final Queue<DataCollection<T>> dataCollectionsToSnapshot = new LinkedList<>();
 
     /**
      * The PK of the last record that was passed to Kafka Connect. In case of
@@ -76,6 +87,11 @@ public class MongoDbIncrementalSnapshotContext<T> implements IncrementalSnapshot
     private Table schema;
 
     private boolean schemaVerificationPassed;
+
+    private ObjectMapper mapper = new ObjectMapper();
+
+    private TypeReference<List<LinkedHashMap<String, String>>> mapperTypeRef = new TypeReference<>() {
+    };
 
     public MongoDbIncrementalSnapshotContext(boolean useCatalogBeforeSchema) {
     }
@@ -139,11 +155,35 @@ public class MongoDbIncrementalSnapshotContext<T> implements IncrementalSnapshot
 
     private String dataCollectionsToSnapshotAsString() {
         // TODO Handle non-standard table ids containing dots, commas etc.
-        return dataCollectionsToSnapshot.stream().map(Object::toString).collect(Collectors.joining(","));
+        try {
+            List<LinkedHashMap<String, String>> dataCollectionsMap = dataCollectionsToSnapshot.stream()
+                    .map(x -> {
+                        LinkedHashMap<String, String> map = new LinkedHashMap<>();
+                        map.put(DATA_COLLECTIONS_TO_SNAPSHOT_KEY_ID, x.getId().toString());
+                        map.put(DATA_COLLECTIONS_TO_SNAPSHOT_KEY_ADDITIONAL_CONDITION,
+                                x.getAdditionalCondition().orElse(null));
+                        return map;
+                    })
+                    .collect(Collectors.toList());
+            return mapper.writeValueAsString(dataCollectionsMap);
+        }
+        catch (JsonProcessingException e) {
+            throw new DebeziumException("Cannot serialize dataCollectionsToSnapshot information");
+        }
     }
 
-    private List<String> stringToDataCollections(String dataCollectionsStr) {
-        return Arrays.asList(dataCollectionsStr.split(","));
+    private List<DataCollection<T>> stringToDataCollections(String dataCollectionsStr) {
+        try {
+            List<LinkedHashMap<String, String>> dataCollections = mapper.readValue(dataCollectionsStr, mapperTypeRef);
+            List<DataCollection<T>> dataCollectionsList = dataCollections.stream()
+                    .map(x -> new DataCollection<T>((T) CollectionId.parse(x.get(DATA_COLLECTIONS_TO_SNAPSHOT_KEY_ID)), null))
+                    .filter(x -> x.getId() != null)
+                    .collect(Collectors.toList());
+            return dataCollectionsList;
+        }
+        catch (JsonProcessingException e) {
+            throw new DebeziumException("Cannot de-serialize dataCollectionsToSnapshot information");
+        }
     }
 
     public boolean snapshotRunning() {
@@ -160,15 +200,15 @@ public class MongoDbIncrementalSnapshotContext<T> implements IncrementalSnapshot
         return offset;
     }
 
-    private void addTablesIdsToSnapshot(List<T> dataCollectionIds) {
+    private void addTablesIdsToSnapshot(List<DataCollection<T>> dataCollectionIds) {
         dataCollectionsToSnapshot.addAll(dataCollectionIds);
     }
 
     @SuppressWarnings("unchecked")
-    public List<T> addDataCollectionNamesToSnapshot(List<String> dataCollectionIds) {
-        final List<T> newDataCollectionIds = dataCollectionIds.stream()
-                .map(x -> (T) CollectionId.parse(x))
-                .filter(x -> x != null) // Remove collections with incorrectly formatted name
+    public List<DataCollection<T>> addDataCollectionNamesToSnapshot(List<String> dataCollectionIds, Optional<String> _additionalCondition) {
+        final List<DataCollection<T>> newDataCollectionIds = dataCollectionIds.stream()
+                .map(x -> new DataCollection<T>((T) CollectionId.parse(x), null))
+                .filter(x -> x.getId() != null) // Remove collections with incorrectly formatted name
                 .collect(Collectors.toList());
         addTablesIdsToSnapshot(newDataCollectionIds);
         return newDataCollectionIds;
@@ -198,7 +238,7 @@ public class MongoDbIncrementalSnapshotContext<T> implements IncrementalSnapshot
         final String dataCollectionsStr = (String) offsets.get(DATA_COLLECTIONS_TO_SNAPSHOT_KEY);
         context.dataCollectionsToSnapshot.clear();
         if (dataCollectionsStr != null) {
-            context.addDataCollectionNamesToSnapshot(context.stringToDataCollections(dataCollectionsStr));
+            context.addTablesIdsToSnapshot(context.stringToDataCollections(dataCollectionsStr));
         }
         return context;
     }
@@ -207,7 +247,7 @@ public class MongoDbIncrementalSnapshotContext<T> implements IncrementalSnapshot
         lastEventKeySent = key;
     }
 
-    public T currentDataCollectionId() {
+    public DataCollection<T> currentDataCollectionId() {
         return dataCollectionsToSnapshot.peek();
     }
 
@@ -240,7 +280,7 @@ public class MongoDbIncrementalSnapshotContext<T> implements IncrementalSnapshot
         return chunkEndPosition != null;
     }
 
-    public T nextDataCollection() {
+    public DataCollection<T> nextDataCollection() {
         resetChunk();
         return dataCollectionsToSnapshot.poll();
     }
@@ -281,16 +321,6 @@ public class MongoDbIncrementalSnapshotContext<T> implements IncrementalSnapshot
     public void setSchemaVerificationPassed(boolean schemaVerificationPassed) {
         this.schemaVerificationPassed = schemaVerificationPassed;
         LOGGER.info("Incremental snapshot's schema verification passed = {}, schema = {}", schemaVerificationPassed, schema);
-    }
-
-    @Override
-    public void addAdditionalConditionToSnapshot(Optional<String> additionalCondition) {
-        throw new UnsupportedOperationException("Additional condition not supported for MongoDB");
-    }
-
-    @Override
-    public Optional<String> getAdditionalConditionToSnapshot() {
-        throw new UnsupportedOperationException("Additional condition not supported for MongoDB");
     }
 
     public static <U> MongoDbIncrementalSnapshotContext<U> load(Map<String, ?> offsets, boolean useCatalogBeforeSchema) {
