@@ -223,7 +223,7 @@ public class MongoDbIncrementalSnapshotContext<T> implements IncrementalSnapshot
     @SuppressWarnings("unchecked")
     public boolean removeDataCollectionFromSnapshot(String dataCollectionId) {
         final T collectionId = (T) CollectionId.parse(dataCollectionId);
-        return dataCollectionsToSnapshot.remove(collectionId);
+        return dataCollectionsToSnapshot.remove(new DataCollection<T>(collectionId, null));
     }
 
     protected static <U> IncrementalSnapshotContext<U> init(MongoDbIncrementalSnapshotContext<U> context, Map<String, ?> offsets) {
