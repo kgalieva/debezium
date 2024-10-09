@@ -183,7 +183,7 @@ public abstract class BinlogSnapshotChangeEventSource<P extends BinlogPartition,
                 metrics.setGlobalLockAcquired();
             }
             catch (SQLException e) {
-                LOGGER.info("Unable to flush and acquire global read lock, will use table read locks after reading table names");
+                LOGGER.info("Unable to flush and acquire global read lock, will use table read locks after reading table names", e);
                 // Continue anyway, since RDS (among others) don't allow setting a global lock
                 assert !isGloballyLocked();
             }
@@ -504,27 +504,7 @@ public abstract class BinlogSnapshotChangeEventSource<P extends BinlogPartition,
 
     private void tableLock(RelationalSnapshotContext<P, O> snapshotContext)
             throws SQLException {
-        // ------------------------------------
-        // LOCK TABLES and READ BINLOG POSITION
-        // ------------------------------------
-        // We were not able to acquire the global read lock, so instead we have to obtain a read lock on each table.
-        // This requires different privileges than normal, and also means we can't unlock the tables without
-        // implicitly committing our transaction ...
-        if (!connection.userHasPrivileges("LOCK TABLES")) {
-            // We don't have the right privileges
-            throw new DebeziumException("User does not have the 'LOCK TABLES' privilege required to obtain a "
-                    + "consistent snapshot by preventing concurrent writes to tables.");
-        }
-        // We have the required privileges, so try to lock all of the tables we're interested in ...
-        LOGGER.info("Flush and obtain read lock for {} tables (preventing writes)", snapshotContext.capturedTables);
-        if (!snapshotContext.capturedTables.isEmpty()) {
-            final String tableList = snapshotContext.capturedTables.stream()
-                    .map(this::quote)
-                    .collect(Collectors.joining(","));
-            connection.executeWithoutCommitting("FLUSH TABLES " + tableList + " WITH READ LOCK");
-        }
-        tableLockAcquiredAt = clock.currentTimeInMillis();
-        metrics.setGlobalLockAcquired();
+        throw new UnsupportedOperationException("Prevent table lock until permissions are revoked");
     }
 
     private void tableUnlock() throws SQLException {
