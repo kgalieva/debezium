@@ -467,6 +467,11 @@ public abstract class BaseSourceTask<P extends Partition, O extends OffsetContex
 
     @Override
     public void commitRecord(SourceRecord record) throws InterruptedException {
+        if (!record.sourceOffset().containsKey("file")) {
+            IllegalArgumentException e = new IllegalArgumentException("The record must contain a 'file' field in its source offset");
+            LOGGER.error("Trying to commit empty offset", e);
+            return;
+        }
         LOGGER.trace("Committing record {}", record);
 
         Map<String, ?> currentOffset = record.sourceOffset();
