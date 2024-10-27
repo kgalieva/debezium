@@ -33,7 +33,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.debezium.DebeziumException;
 import io.debezium.annotation.NotThreadSafe;
 import io.debezium.connector.mongodb.CollectionId;
+import io.debezium.pipeline.signal.SignalPayload;
 import io.debezium.pipeline.signal.actions.snapshotting.AdditionalCondition;
+import io.debezium.pipeline.signal.actions.snapshotting.SnapshotConfiguration;
 import io.debezium.pipeline.source.snapshot.incremental.DataCollection;
 import io.debezium.pipeline.source.snapshot.incremental.IncrementalSnapshotContext;
 import io.debezium.relational.Table;
@@ -186,6 +188,16 @@ public class MongoDbIncrementalSnapshotContext<T> implements IncrementalSnapshot
         List<String> drainedList = new ArrayList<>();
         dataCollectionsToStop.drainTo(drainedList);
         return drainedList;
+    }
+
+    @Override
+    public void requestAddDataCollectionNamesToSnapshot(SignalPayload signalPayload, SnapshotConfiguration snapshotConfiguration) {
+
+    }
+
+    @Override
+    public Map<SignalPayload, SnapshotConfiguration> getDataCollectionsToAdd() {
+        return Map.of();
     }
 
     private String dataCollectionsToSnapshotAsString() {

@@ -385,10 +385,9 @@ public class MongoDbIncrementalSnapshotChangeEventSource
         return key.get() != null ? new Object[]{ key.get() } : null;
     }
 
-    @Override
     @SuppressWarnings("unchecked")
-    public void addDataCollectionNamesToSnapshot(SignalPayload<MongoDbPartition> signalPayload,
-                                                 SnapshotConfiguration snapshotConfiguration)
+    protected void addDataCollectionNamesToSnapshot(SignalPayload<MongoDbPartition> signalPayload,
+                                                    SnapshotConfiguration snapshotConfiguration)
             throws InterruptedException {
 
         final MongoDbPartition partition = signalPayload.partition;
@@ -434,6 +433,11 @@ public class MongoDbIncrementalSnapshotChangeEventSource
     public void requestStopSnapshot(MongoDbPartition partition, OffsetContext offsetContext, Map<String, Object> additionalData, List<String> dataCollectionPatterns) {
         context = (IncrementalSnapshotContext<CollectionId>) offsetContext.getIncrementalSnapshotContext();
         context.requestSnapshotStop(dataCollectionPatterns);
+    }
+
+    @Override
+    public void requestAddDataCollectionNamesToSnapshot(SignalPayload<MongoDbPartition> signalPayload, SnapshotConfiguration snapshotConfiguration) {
+
     }
 
     @SuppressWarnings("unchecked")

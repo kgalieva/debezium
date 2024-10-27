@@ -17,6 +17,7 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -454,21 +455,18 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<P extends Par
         }
     }
 
-    @Override
     @SuppressWarnings("unchecked")
-    public void addDataCollectionNamesToSnapshot(SignalPayload<P> signalPayload, SnapshotConfiguration snapshotConfiguration)
+    protected void addDataCollectionNamesToSnapshot(P partition, OffsetContext offsetContext, SignalPayload<P> signalPayload, SnapshotConfiguration snapshotConfiguration)
             throws InterruptedException {
 
-        final OffsetContext offsetContext = signalPayload.offsetContext;
-        final P partition = signalPayload.partition;
         final String correlationId = signalPayload.id;
 
         context = (IncrementalSnapshotContext<T>) offsetContext.getIncrementalSnapshotContext();
         boolean shouldReadChunk = !context.snapshotRunning();
 
         List<String> expandedDataCollectionIds = expandAndDedupeDataCollectionIds(snapshotConfiguration.getDataCollections());
-        LOGGER.trace("Configured data collections {}", snapshotConfiguration.getDataCollections());
-        LOGGER.trace("Expanded data collections {}", expandedDataCollectionIds);
+        LOGGER.info("Configured data collections {}", snapshotConfiguration.getDataCollections());
+        LOGGER.info("Expanded data collections {}", expandedDataCollectionIds);
         if (expandedDataCollectionIds.size() > snapshotConfiguration.getDataCollections().size()) {
             LOGGER.info("Data-collections to snapshot have been expanded from {} to {}", snapshotConfiguration.getDataCollections(), expandedDataCollectionIds);
         }
@@ -496,6 +494,47 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<P extends Par
     public void requestStopSnapshot(P partition, OffsetContext offsetContext, Map<String, Object> additionalData, List<String> dataCollectionIds) {
         context = (IncrementalSnapshotContext<T>) offsetContext.getIncrementalSnapshotContext();
         context.requestSnapshotStop(dataCollectionIds);
+    }
+
+    @Override
+    public void requestAddDataCollectionNamesToSnapshot(SignalPayload<P> signalPayload, SnapshotConfiguration snapshotConfiguration) {
+        final OffsetContext offsetContext = signalPayload.offsetContext;
+        LOGGER.info("Request data collections {}", signalPayload);
+        context = (IncrementalSnapshotContext<T>) offsetContext.getIncrementalSnapshotContext();
+        context.requestAddDataCollectionNamesToSnapshot(signalPayload, snapshotConfiguration);
+    }
+
+    @Override
+    public void processHeartbeat(P partition, OffsetContext offsetContext) throws InterruptedException {
+        checkAndAddDataCollections(partition, offsetContext);
+    }
+
+    @Override
+    public void processFilteredEvent(P partition, OffsetContext offsetContext) throws InterruptedException {
+        checkAndAddDataCollections(partition, offsetContext);
+    }
+
+    @Override
+    public void processTransactionStartedEvent(P partition, OffsetContext offsetContext) throws InterruptedException {
+        checkAndAddDataCollections(partition, offsetContext);
+    }
+
+    @Override
+    public void processTransactionCommittedEvent(P partition, OffsetContext offsetContext) throws InterruptedException {
+        checkAndAddDataCollections(partition, offsetContext);
+    }
+
+    private void checkAndAddDataCollections(P partition, OffsetContext offsetContext) throws InterruptedException {
+        LOGGER.info("Check and add data collections {}", context.getDataCollectionsToAdd().keySet());
+        Map<SignalPayload, SnapshotConfiguration> map = context.getDataCollectionsToAdd();
+        Iterator<Map.Entry<SignalPayload, SnapshotConfiguration>> iterator = map.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<SignalPayload, SnapshotConfiguration> entry = iterator.next();
+            SignalPayload signalPayload = entry.getKey();
+            SnapshotConfiguration snapshotConfiguration = entry.getValue();
+            addDataCollectionNamesToSnapshot(partition, offsetContext, signalPayload, snapshotConfiguration);
+            map.remove(signalPayload);
+        }
     }
 
     @SuppressWarnings("unchecked")

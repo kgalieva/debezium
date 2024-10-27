@@ -137,13 +137,6 @@ public abstract class BinlogReadOnlyIncrementalSnapshotChangeEventSource<P exten
     }
 
     @Override
-    public void addDataCollectionNamesToSnapshot(SignalPayload<P> signalPayload, SnapshotConfiguration snapshotConfiguration)
-            throws InterruptedException {
-        final Map<String, Object> additionalData = signalPayload.additionalData;
-        super.addDataCollectionNamesToSnapshot(signalPayload, snapshotConfiguration);
-    }
-
-    @Override
     public void requestStopSnapshot(P partition, OffsetContext offsetContext, Map<String, Object> additionalData, List<String> dataCollectionIds) {
         super.requestStopSnapshot(partition, offsetContext, additionalData, dataCollectionIds);
     }
